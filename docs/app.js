@@ -321,7 +321,7 @@ function buildArtistGroups() {
       byId.set(primaryArtist.id, {
         id: primaryArtist.id,
         name: primaryArtist.name,
-        imageUrl: album.images?.[2]?.url || album.images?.[0]?.url || "",
+        imageUrl: album.images?.[1]?.url || album.images?.[0]?.url || album.images?.[2]?.url || "",
         albums: [],
       });
     }
@@ -400,7 +400,7 @@ function renderArtistAlbums(artist) {
     const li = document.createElement("li");
     li.className = "album-row";
     li.innerHTML = `
-      <img src="${album.images?.[2]?.url || album.images?.[0]?.url || ""}" alt="" />
+      <img src="${album.images?.[1]?.url || album.images?.[0]?.url || album.images?.[2]?.url || ""}" alt="" />
       <div class="album-row-info">
         <div class="album-row-title">${escapeHtml(album.name)}</div>
       </div>
