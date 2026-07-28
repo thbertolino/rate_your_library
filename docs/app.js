@@ -266,13 +266,43 @@ async function fetchAllSavedAlbums(onProgress) {
 
 // O endpoint em lote (GET /v1/artists?ids=...) e bloqueado (403) para este
 // app - so o endpoint singular (GET /v1/artists/{id}) funciona, e a cota pra
-// esse app e baixa (ate uma de cada vez, sem pausa, toma 429 depois de um
-// tempo). Por isso so buscamos a foto dos artistas que estao visiveis na
-// pagina atual, nunca da biblioteca inteira de uma vez.
+// esse app e baixa. Por isso so buscamos a foto dos artistas visiveis na
+// pagina atual (nunca da biblioteca inteira), E guardamos o resultado no
+// localStorage pra nunca ter que buscar a mesma foto duas vezes - sem isso,
+// navegar por varias paginas na mesma sessao volta a bater no limite.
+const ARTIST_PHOTO_CACHE_KEY = "ryl_artist_photo_cache_v1";
+
+function loadArtistPhotoCache() {
+  try {
+    return JSON.parse(localStorage.getItem(ARTIST_PHOTO_CACHE_KEY) || "{}");
+  } catch {
+    return {};
+  }
+}
+
+function saveArtistPhotoCache(cache) {
+  try {
+    localStorage.setItem(ARTIST_PHOTO_CACHE_KEY, JSON.stringify(cache));
+  } catch (err) {
+    console.warn("Não foi possível salvar cache de fotos de artista:", err);
+  }
+}
+
 let photoLoadToken = 0;
 
 async function loadPhotosForVisibleArtists(visibleArtists) {
   const token = ++photoLoadToken; // se a pagina mudar no meio do caminho, essa busca se cancela sozinha
+  const cache = loadArtistPhotoCache();
+
+  // Aplica na hora o que ja sabemos, sem gastar nenhuma chamada de rede.
+  visibleArtists.forEach((artist) => {
+    if (!artist.photoFetched && cache[artist.id]) {
+      artist.imageUrl = cache[artist.id];
+      artist.photoFetched = true;
+      updateArtistRowImage(artist.id, artist.imageUrl);
+    }
+  });
+
   const toFetch = visibleArtists.filter((a) => !a.photoFetched);
   if (!toFetch.length) return;
 
@@ -284,7 +314,10 @@ async function loadPhotosForVisibleArtists(visibleArtists) {
       if (res.ok) {
         const data = await res.json();
         const images = data.images || [];
-        artist.imageUrl = images[1]?.url || images[0]?.url || artist.imageUrl;
+        const imageUrl = images[1]?.url || images[0]?.url || artist.imageUrl;
+        artist.imageUrl = imageUrl;
+        cache[artist.id] = imageUrl;
+        saveArtistPhotoCache(cache);
       }
     } catch (err) {
       console.warn(`Falha ao buscar foto do artista ${artist.id}:`, err);
@@ -294,7 +327,7 @@ async function loadPhotosForVisibleArtists(visibleArtists) {
     if (token !== photoLoadToken) return;
     updateArtistRowImage(artist.id, artist.imageUrl);
 
-    await new Promise((resolve) => setTimeout(resolve, 150)); // folga entre chamadas
+    await new Promise((resolve) => setTimeout(resolve, 200)); // folga entre chamadas
   }
 }
 
