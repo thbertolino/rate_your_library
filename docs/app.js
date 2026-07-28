@@ -83,6 +83,9 @@ const starPicker = el("star-picker");
 const listenedToggle = el("listened-toggle");
 const listenedCheckbox = el("listened-checkbox");
 const tracksLoadingEl = el("tracks-loading");
+const tracksErrorEl = el("tracks-error");
+const tracksRetryBtn = el("tracks-retry-btn");
+const checkLikedBtn = el("check-liked-btn");
 const trackListEl = el("track-list");
 
 const ratingsListEl = el("ratings-list");
@@ -538,30 +541,80 @@ async function openAlbum(album) {
   listenedCheckbox.checked = !!r.listened;
   listenedToggle.classList.toggle("on", !!r.listened);
 
+  await loadAlbumTracks(album);
+}
+
+let currentTracks = [];
+let currentSavedFlags = [];
+
+async function loadAlbumTracks(album) {
   trackListEl.innerHTML = "";
+  tracksErrorEl.classList.add("hidden");
+  tracksRetryBtn.classList.add("hidden");
+  checkLikedBtn.classList.add("hidden");
   tracksLoadingEl.classList.remove("hidden");
 
   try {
-    const tracksRes = await spotifyFetch(`https://api.spotify.com/v1/albums/${album.id}/tracks?limit=50`);
-    const tracksData = await tracksRes.json();
-    const tracks = tracksData.items || [];
+    const tracksRes = await spotifyFetch(`https://api.spotify.com/v1/albums/${album.id}/tracks?limit=50`, {}, 5);
 
-    let savedFlags = tracks.map(() => false);
-    const trackIds = tracks.map((t) => t.id).filter(Boolean);
-    if (trackIds.length) {
-      const containsRes = await spotifyFetch(
-        `https://api.spotify.com/v1/me/tracks/contains?ids=${trackIds.join(",")}`
-      );
-      if (containsRes.ok) savedFlags = await containsRes.json();
+    if (!tracksRes.ok) {
+      throw new Error(tracksRes.status === 429 ? "RATE_LIMITED" : `HTTP_${tracksRes.status}`);
     }
 
-    renderTrackList(tracks, savedFlags);
+    const tracksData = await tracksRes.json();
+    currentTracks = tracksData.items || [];
+    currentSavedFlags = currentTracks.map(() => null); // null = ainda nao verificado
+
+    renderTrackList(currentTracks, currentSavedFlags);
+    checkLikedBtn.classList.toggle("hidden", currentTracks.length === 0);
   } catch (err) {
     console.error("Erro ao carregar faixas:", err);
+    tracksErrorEl.textContent =
+      err.message === "RATE_LIMITED"
+        ? "⚠️ Muitas requisições ao Spotify agora. Aguarde um instante e tente de novo."
+        : "Não foi possível carregar as faixas desse álbum.";
+    tracksErrorEl.classList.remove("hidden");
+    tracksRetryBtn.classList.remove("hidden");
   } finally {
     tracksLoadingEl.classList.add("hidden");
   }
 }
+
+tracksRetryBtn.onclick = () => {
+  if (currentAlbum) loadAlbumTracks(currentAlbum);
+};
+
+// A checagem de "quais faixas ja curti" e uma segunda chamada por album -
+// deixamos sob demanda (o usuario pede clicando) em vez de automatica, pra
+// nao dobrar o numero de requisicoes so de abrir um album.
+checkLikedBtn.onclick = async () => {
+  const trackIds = currentTracks.map((t) => t.id).filter(Boolean);
+  if (!trackIds.length) return;
+
+  checkLikedBtn.disabled = true;
+  checkLikedBtn.textContent = "Verificando...";
+
+  try {
+    const containsRes = await spotifyFetch(
+      `https://api.spotify.com/v1/me/tracks/contains?ids=${trackIds.join(",")}`,
+      {},
+      5
+    );
+    if (containsRes.ok) {
+      currentSavedFlags = await containsRes.json();
+      renderTrackList(currentTracks, currentSavedFlags);
+      checkLikedBtn.classList.add("hidden");
+    } else {
+      alert("Não foi possível verificar as faixas curtidas agora.");
+    }
+  } catch (err) {
+    console.error("Erro ao verificar faixas curtidas:", err);
+    alert("Não foi possível verificar as faixas curtidas agora.");
+  } finally {
+    checkLikedBtn.disabled = false;
+    checkLikedBtn.textContent = "🤍 Ver quais já curti";
+  }
+};
 
 function renderTrackList(tracks, savedFlags) {
   trackListEl.innerHTML = "";
@@ -577,15 +630,23 @@ function renderTrackList(tracks, savedFlags) {
     nameSpan.className = "track-name";
     nameSpan.textContent = track.name;
 
+    const isUnknown = savedFlags[i] === null || savedFlags[i] === undefined;
+
     const heartBtn = document.createElement("button");
     heartBtn.type = "button";
     heartBtn.className = `track-saved ${savedFlags[i] ? "on" : ""}`;
     heartBtn.style.background = "transparent";
     heartBtn.style.border = "none";
-    heartBtn.style.cursor = "pointer";
-    heartBtn.title = savedFlags[i] ? "Salva na sua biblioteca (clique para remover)" : "Não salva (clique para adicionar)";
-    heartBtn.textContent = savedFlags[i] ? "💚" : "🤍";
-    heartBtn.onclick = () => toggleTrackSaved(track.id, heartBtn, savedFlags, i);
+    heartBtn.style.cursor = isUnknown ? "default" : "pointer";
+    heartBtn.disabled = isUnknown;
+    heartBtn.title = isUnknown
+      ? 'Toque em "Ver quais já curti" acima pra verificar'
+      : savedFlags[i]
+      ? "Salva na sua biblioteca (clique para remover)"
+      : "Não salva (clique para adicionar)";
+    heartBtn.textContent = isUnknown ? "🤍" : savedFlags[i] ? "💚" : "🤍";
+    heartBtn.style.opacity = isUnknown ? "0.35" : "1";
+    if (!isUnknown) heartBtn.onclick = () => toggleTrackSaved(track.id, heartBtn, savedFlags, i);
 
     li.append(numberSpan, nameSpan, heartBtn);
     trackListEl.appendChild(li);
