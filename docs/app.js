@@ -252,8 +252,12 @@ function sortAlbumItems(items) {
 
 // So guarda os campos que o app realmente usa - o objeto "album" completo
 // que o Spotify devolve traz bastante coisa que nao usamos (available_markets,
-// copyrights, genres, faixas...) e isso pesa demais pra guardar no localStorage
-// com quase mil albuns.
+// copyrights, genres...) e isso pesa demais pra guardar no localStorage com
+// quase mil albuns. As faixas (tracks), por outro lado, a gente MANTEM: o
+// Spotify ja devolve o album inteiro (com as faixas embutidas) dentro da
+// resposta de /me/albums - que nunca deu 429 - entao aproveitamos isso pra
+// nunca precisar chamar o endpoint de faixas separado (que esta com cota
+// estourada) pra album nenhum que caiba numa unica pagina de faixas.
 function leanAlbumItem({ album }) {
   return {
     album: {
@@ -262,6 +266,12 @@ function leanAlbumItem({ album }) {
       images: album.images,
       artists: album.artists.map((a) => ({ id: a.id, name: a.name })),
       external_urls: { spotify: album.external_urls?.spotify },
+      tracks: album.tracks
+        ? {
+            items: (album.tracks.items || []).map(leanTrack),
+            total: album.tracks.total ?? album.tracks.items?.length ?? 0,
+          }
+        : null,
     },
   };
 }
@@ -644,6 +654,21 @@ async function loadAlbumTracks(album, { forceRefresh = false } = {}) {
   tracksRetryBtn.classList.add("hidden");
   checkLikedBtn.classList.add("hidden");
   refreshTracksBtn.classList.add("hidden");
+
+  // O album ja veio com as faixas embutidas (parte da resposta de /me/albums,
+  // que nunca deu 429) - se vieram todas, nem precisa chamar o endpoint de
+  // faixas separado (que esta com cota estourada).
+  const embeddedTracks = album.tracks;
+  if (!forceRefresh && embeddedTracks && embeddedTracks.items.length >= embeddedTracks.total) {
+    currentTracks = embeddedTracks.items;
+    currentSavedFlags = currentTracks.map(() => null);
+    renderTrackList(currentTracks, currentSavedFlags);
+    checkLikedBtn.classList.toggle("hidden", currentTracks.length === 0);
+    refreshTracksBtn.classList.remove("hidden");
+    saveTrackListToCache(album.id, currentTracks);
+    renderAlbumRatingSummary(album);
+    return;
+  }
 
   const cached = !forceRefresh ? loadTracksCache()[album.id] : null;
   if (cached) {
