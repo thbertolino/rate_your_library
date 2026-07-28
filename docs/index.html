@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8" />
+  <title>Rate Your Library</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#1db954" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⭐</text></svg>" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app">
+    <div class="app-inner">
+      <header>
+        <h1>
+          <span class="icon">⭐</span>
+          <span>Rate Your Library</span>
+        </h1>
+        <p>Avalie os albuns salvos da sua biblioteca Spotify.</p>
+      </header>
+
+      <main>
+        <!-- LOGIN -->
+        <section id="view-login" class="view">
+          <div class="card">
+            <div class="card-header">Bem-vindo</div>
+            <p>Faça login com sua conta Spotify para ver e avaliar seus albuns salvos.</p>
+            <p class="helper-text">Só usamos permissão de leitura da sua biblioteca &nbsp;💿</p>
+          </div>
+          <button id="login-btn" class="primary-btn">
+            <span class="icon">🔑</span>
+            <span>Login com Spotify</span>
+          </button>
+        </section>
+
+        <!-- ARTISTS -->
+        <section id="view-artists" class="view hidden">
+          <form autocomplete="off" onsubmit="return false;">
+            <input id="search-input" class="search-box" type="text" inputmode="search"
+              placeholder="Buscar artista..." autocomplete="off" autocorrect="off"
+              autocapitalize="off" spellcheck="false" name="rylsearch_no_autofill" />
+          </form>
+          <div id="library-loading" class="loading hidden">
+            <div class="loading-dot"></div><div class="loading-dot"></div><div class="loading-dot"></div>
+            <span>Carregando sua biblioteca...</span>
+          </div>
+          <ul id="artist-list" class="album-list"></ul>
+          <div id="artist-pagination" class="pagination"></div>
+          <p id="library-empty" class="empty-state hidden">Nenhum artista encontrado.</p>
+          <button id="logout-btn" class="back-btn" style="align-self:center;margin-top:6px;">Sair da conta</button>
+        </section>
+
+        <!-- ARTIST ALBUMS -->
+        <section id="view-artist" class="view hidden">
+          <button id="back-to-artists-btn" class="back-btn">&larr; Artistas</button>
+          <div class="card-header" id="artist-page-title" style="text-align:center;"></div>
+          <ul id="artist-album-list" class="album-list"></ul>
+        </section>
+
+        <!-- ALBUM DETAIL -->
+        <section id="view-album" class="view hidden">
+          <button id="back-btn" class="back-btn">&larr; Voltar</button>
+          <div class="card">
+            <div id="album-detail-cover"><img id="album-detail-img" alt="" /></div>
+            <div id="album-detail-title" style="font-size:1.1rem;font-weight:700;"></div>
+            <div id="album-detail-artist" class="helper-text" style="margin-top:2px;cursor:pointer;text-decoration:underline;"></div>
+
+            <div class="star-picker" id="star-picker">
+              <span class="star" data-value="1">★</span>
+              <span class="star" data-value="2">★</span>
+              <span class="star" data-value="3">★</span>
+              <span class="star" data-value="4">★</span>
+              <span class="star" data-value="5">★</span>
+            </div>
+
+            <label class="listened-toggle" id="listened-toggle">
+              <input type="checkbox" id="listened-checkbox" />
+              <span>Já ouvi este álbum</span>
+            </label>
+
+            <a id="album-detail-link" class="spotify-link" href="#" target="_blank" rel="noopener noreferrer">
+              <span class="spotify-dot"></span>
+              <span>Abrir no Spotify</span>
+            </a>
+          </div>
+
+          <div class="card" style="text-align:left;">
+            <div class="card-header" style="text-align:center;">Faixas</div>
+            <div id="tracks-loading" class="loading hidden">
+              <div class="loading-dot"></div><div class="loading-dot"></div><div class="loading-dot"></div>
+            </div>
+            <ul id="track-list" class="track-list"></ul>
+          </div>
+        </section>
+
+        <!-- RATINGS -->
+        <section id="view-ratings" class="view hidden">
+          <ul id="ratings-list" class="album-list"></ul>
+          <p id="ratings-empty" class="empty-state hidden">Você ainda não avaliou nenhum álbum.<br />Toque em um álbum na sua biblioteca para começar.</p>
+        </section>
+      </main>
+
+      <nav id="tabbar" class="tabbar hidden">
+        <button class="tab-btn active" data-tab="artists">
+          <span>🎤</span><span>Artistas</span>
+        </button>
+        <button class="tab-btn" data-tab="ratings">
+          <span>⭐</span><span>Avaliações</span>
+        </button>
+      </nav>
+    </div>
+  </div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
