@@ -27,7 +27,7 @@ const db = getFirestore(firebaseApp);
 const SCOPES = "user-library-read user-library-modify";
 
 // Nao e segredo (fluxo Authorization Code + PKCE, client publico).
-const CLIENT_ID = "5672ca28ebf240b891806b339bfc4972";
+const CLIENT_ID = "d7ae9370ca554540a1e671eda02ff844";
 // Precisa bater exatamente com uma Redirect URI cadastrada no app do Spotify
 // (calculado em runtime pra funcionar tanto local quanto no GitHub Pages).
 const REDIRECT_URI = window.location.origin + window.location.pathname;
