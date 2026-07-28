@@ -104,6 +104,11 @@
 
         <!-- RATINGS -->
         <section id="view-ratings" class="view hidden">
+          <form autocomplete="off" onsubmit="return false;">
+            <input id="ratings-search-input" class="search-box" type="text" inputmode="search"
+              placeholder="Buscar álbum ou artista avaliado..." autocomplete="off" autocorrect="off"
+              autocapitalize="off" spellcheck="false" name="rylratingssearch_no_autofill" />
+          </form>
           <ul id="ratings-list" class="album-list"></ul>
           <p id="ratings-empty" class="empty-state hidden">Você ainda não avaliou nenhum álbum.<br />Toque em um álbum na sua biblioteca para começar.</p>
         </section>

@@ -92,6 +92,7 @@ const refreshTracksBtn = el("refresh-tracks-btn");
 
 const ratingsListEl = el("ratings-list");
 const ratingsEmptyEl = el("ratings-empty");
+const ratingsSearchInput = el("ratings-search-input");
 
 /* --------------------------------------------------
    VIEW SWITCHING
@@ -113,7 +114,7 @@ document.querySelectorAll(".tab-btn").forEach((btn) => {
   btn.onclick = () => {
     const tab = btn.dataset.tab;
     showView(tab);
-    if (tab === "ratings") renderRatingsView();
+    if (tab === "ratings") renderRatingsView(ratingsSearchInput.value);
   };
 });
 
@@ -468,6 +469,10 @@ searchInput.oninput = () => {
   renderArtistList(searchInput.value);
 };
 
+ratingsSearchInput.oninput = () => {
+  renderRatingsView(ratingsSearchInput.value);
+};
+
 DESKTOP_QUERY.addEventListener("change", () => {
   artistPage = 1;
   if (!views.artists.classList.contains("hidden")) renderArtistList(searchInput.value);
@@ -573,13 +578,21 @@ async function saveTrackRating(album, trackId, newRating) {
   ratingsCache[album.id] = payload;
 }
 
-function renderRatingsView() {
+function renderRatingsView(filterText = "") {
   ratingsListEl.innerHTML = "";
+  const term = filterText.trim().toLowerCase();
+
   const rated = Object.entries(ratingsCache)
     .filter(([, r]) => r.rating > 0 || r.listened)
+    .filter(
+      ([, r]) => !term || (r.name || "").toLowerCase().includes(term) || (r.artist || "").toLowerCase().includes(term)
+    )
     .sort((a, b) => new Date(b[1].updatedAt || 0) - new Date(a[1].updatedAt || 0));
 
   ratingsEmptyEl.classList.toggle("hidden", rated.length > 0);
+  ratingsEmptyEl.innerHTML = term
+    ? "Nenhum álbum avaliado encontrado com esse termo."
+    : "Você ainda não avaliou nenhum álbum.<br />Toque em um álbum na sua biblioteca para começar.";
 
   rated.forEach(([albumId, r]) => {
     const li = document.createElement("li");
@@ -803,7 +816,7 @@ async function handleTrackStarClick(trackId, value, starRow) {
 
 function refreshBadgesEverywhere() {
   if (currentArtist) renderArtistAlbums(currentArtist);
-  renderRatingsView();
+  renderRatingsView(ratingsSearchInput.value);
 }
 
 listenedToggle.onclick = async (e) => {
