@@ -264,78 +264,6 @@ async function fetchAllSavedAlbums(onProgress) {
   return sortAlbumItems(items);
 }
 
-// O endpoint em lote (GET /v1/artists?ids=...) e bloqueado (403) para este
-// app - so o endpoint singular (GET /v1/artists/{id}) funciona, e a cota pra
-// esse app e baixa. Por isso so buscamos a foto dos artistas visiveis na
-// pagina atual (nunca da biblioteca inteira), E guardamos o resultado no
-// localStorage pra nunca ter que buscar a mesma foto duas vezes - sem isso,
-// navegar por varias paginas na mesma sessao volta a bater no limite.
-const ARTIST_PHOTO_CACHE_KEY = "ryl_artist_photo_cache_v1";
-
-function loadArtistPhotoCache() {
-  try {
-    return JSON.parse(localStorage.getItem(ARTIST_PHOTO_CACHE_KEY) || "{}");
-  } catch {
-    return {};
-  }
-}
-
-function saveArtistPhotoCache(cache) {
-  try {
-    localStorage.setItem(ARTIST_PHOTO_CACHE_KEY, JSON.stringify(cache));
-  } catch (err) {
-    console.warn("Não foi possível salvar cache de fotos de artista:", err);
-  }
-}
-
-let photoLoadToken = 0;
-
-async function loadPhotosForVisibleArtists(visibleArtists) {
-  const token = ++photoLoadToken; // se a pagina mudar no meio do caminho, essa busca se cancela sozinha
-  const cache = loadArtistPhotoCache();
-
-  // Aplica na hora o que ja sabemos, sem gastar nenhuma chamada de rede.
-  visibleArtists.forEach((artist) => {
-    if (!artist.photoFetched && cache[artist.id]) {
-      artist.imageUrl = cache[artist.id];
-      artist.photoFetched = true;
-      updateArtistRowImage(artist.id, artist.imageUrl);
-    }
-  });
-
-  const toFetch = visibleArtists.filter((a) => !a.photoFetched);
-  if (!toFetch.length) return;
-
-  for (const artist of toFetch) {
-    if (token !== photoLoadToken) return;
-
-    try {
-      const res = await spotifyFetch(`https://api.spotify.com/v1/artists/${artist.id}`, {}, 6);
-      if (res.ok) {
-        const data = await res.json();
-        const images = data.images || [];
-        const imageUrl = images[1]?.url || images[0]?.url || artist.imageUrl;
-        artist.imageUrl = imageUrl;
-        cache[artist.id] = imageUrl;
-        saveArtistPhotoCache(cache);
-      }
-    } catch (err) {
-      console.warn(`Falha ao buscar foto do artista ${artist.id}:`, err);
-    }
-    artist.photoFetched = true;
-
-    if (token !== photoLoadToken) return;
-    updateArtistRowImage(artist.id, artist.imageUrl);
-
-    await new Promise((resolve) => setTimeout(resolve, 200)); // folga entre chamadas
-  }
-}
-
-function updateArtistRowImage(artistId, imageUrl) {
-  const row = artistListEl.querySelector(`li[data-artist-id="${CSS.escape(artistId)}"] img`);
-  if (row) row.src = imageUrl;
-}
-
 function albumBadgeHtml(albumId) {
   const r = ratingsCache[albumId];
   if (!r) return "";
@@ -354,7 +282,6 @@ function buildArtistGroups() {
         id: primaryArtist.id,
         name: primaryArtist.name,
         imageUrl: album.images?.[2]?.url || album.images?.[0]?.url || "",
-        photoFetched: false, // se ja tentamos buscar a foto real do Spotify pra esse artista
         albums: [],
       });
     }
@@ -423,8 +350,6 @@ function renderArtistList(filterText = "") {
     renderArtistList(searchInput.value);
     artistListEl.scrollIntoView({ behavior: "smooth", block: "start" });
   });
-
-  loadPhotosForVisibleArtists(pageItems); // busca so as fotos da pagina atual, em segundo plano
 }
 
 function renderArtistAlbums(artist) {
