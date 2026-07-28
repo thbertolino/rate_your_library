@@ -455,14 +455,20 @@ main {
 
 .track-row {
   display: flex;
-  align-items: center;
-  gap: 10px;
+  flex-direction: column;
+  gap: 4px;
   padding: 8px 6px;
   border-radius: 10px;
 }
 
 .track-row:hover {
   background: rgba(148, 163, 184, 0.06);
+}
+
+.track-row-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .track-number {
@@ -490,6 +496,27 @@ main {
 
 .track-saved.on {
   opacity: 1;
+}
+
+.track-star-picker {
+  display: flex;
+  gap: 3px;
+  padding-left: 30px;
+  font-size: 1rem;
+}
+
+.track-star-picker .star {
+  cursor: pointer;
+  color: rgba(148, 163, 184, 0.35);
+  transition: transform 0.1s ease, color 0.15s ease;
+}
+
+.track-star-picker .star.filled {
+  color: var(--star-gold);
+}
+
+.track-star-picker .star:hover {
+  transform: scale(1.15);
 }
 
 @media (min-width: 480px) {
