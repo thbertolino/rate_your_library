@@ -444,6 +444,12 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
+function formatWaitTime(seconds) {
+  if (seconds < 60) return `${seconds} segundo${seconds === 1 ? "" : "s"}`;
+  const minutes = Math.ceil(seconds / 60);
+  return `${minutes} minuto${minutes === 1 ? "" : "s"}`;
+}
+
 searchInput.oninput = () => {
   artistPage = 1;
   renderArtistList(searchInput.value);
@@ -656,7 +662,13 @@ async function loadAlbumTracks(album, { forceRefresh = false } = {}) {
     const tracksRes = await spotifyFetch(`https://api.spotify.com/v1/albums/${album.id}/tracks?limit=50`, {}, 5);
 
     if (!tracksRes.ok) {
-      throw new Error(tracksRes.status === 429 ? "RATE_LIMITED" : `HTTP_${tracksRes.status}`);
+      if (tracksRes.status === 429) {
+        const retryAfter = Number(tracksRes.headers.get("Retry-After")) || null;
+        const err = new Error("RATE_LIMITED");
+        err.retryAfter = retryAfter;
+        throw err;
+      }
+      throw new Error(`HTTP_${tracksRes.status}`);
     }
 
     const tracksData = await tracksRes.json();
@@ -670,10 +682,13 @@ async function loadAlbumTracks(album, { forceRefresh = false } = {}) {
     renderAlbumRatingSummary(album);
   } catch (err) {
     console.error("Erro ao carregar faixas:", err);
-    tracksErrorEl.textContent =
-      err.message === "RATE_LIMITED"
-        ? "⚠️ Muitas requisições ao Spotify agora. Aguarde um instante e tente de novo."
-        : "Não foi possível carregar as faixas desse álbum.";
+    if (err.message === "RATE_LIMITED") {
+      tracksErrorEl.textContent = err.retryAfter
+        ? `⚠️ Muitas requisições ao Spotify agora. O próprio Spotify pediu pra esperar ${formatWaitTime(err.retryAfter)} antes de tentar de novo.`
+        : "⚠️ Muitas requisições ao Spotify agora. Aguarde um instante e tente de novo.";
+    } else {
+      tracksErrorEl.textContent = "Não foi possível carregar as faixas desse álbum.";
+    }
     tracksErrorEl.classList.remove("hidden");
     tracksRetryBtn.classList.remove("hidden");
   } finally {
