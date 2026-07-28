@@ -635,11 +635,14 @@ function saveTrackListToCache(albumId, tracks) {
   }
 }
 
-// Quando o Spotify nao manda Retry-After no 429, nao e um limite curto e
-// previsivel - e uma cota mais ampla (provavelmente por hora) estourada.
-// Chutar um numero pequeno so faz o app bater de novo e continuar falhando.
-const UNKNOWN_COOLDOWN_SECONDS = 5 * 60;
+// O Spotify documenta que apps em Development Mode tem uma COTA (nao so um
+// limite de velocidade) por "bucket" de endpoints, com reason "QUOTA_EXCEEDED"
+// - diferente de um rate limit comum, o periodo de reset nao e divulgado e
+// pode ser bem mais que minutos. Sem Retry-After pra guiar, assumimos 1 hora
+// como um chute mais realista (5 minutos nao foi suficiente na pratica).
+const UNKNOWN_COOLDOWN_SECONDS = 60 * 60;
 const RATE_LIMIT_COOLDOWN_KEY = "ryl_rate_limit_cooldown_until";
+const RATE_LIMIT_QUOTA_KEY = "ryl_rate_limit_is_quota";
 let cooldownIntervalId = null;
 
 function getCooldownRemainingSeconds() {
@@ -647,8 +650,9 @@ function getCooldownRemainingSeconds() {
   return Math.max(0, Math.ceil((until - Date.now()) / 1000));
 }
 
-function setCooldown(seconds) {
+function setCooldown(seconds, { isQuotaExceeded = false } = {}) {
   localStorage.setItem(RATE_LIMIT_COOLDOWN_KEY, String(Date.now() + seconds * 1000));
+  localStorage.setItem(RATE_LIMIT_QUOTA_KEY, isQuotaExceeded ? "1" : "0");
 }
 
 // Mostra (e mantem atualizada, contando pra baixo) a mensagem de espera, sem
@@ -656,6 +660,7 @@ function setCooldown(seconds) {
 // a gente para de gastar a cota que ja esta estourada em tentativas inuteis.
 function showCooldownCountdown() {
   if (cooldownIntervalId) clearInterval(cooldownIntervalId);
+  const isQuotaExceeded = localStorage.getItem(RATE_LIMIT_QUOTA_KEY) === "1";
 
   const tick = () => {
     const remaining = getCooldownRemainingSeconds();
@@ -666,7 +671,9 @@ function showCooldownCountdown() {
       tracksRetryBtn.classList.remove("hidden");
       return;
     }
-    tracksErrorEl.textContent = `⚠️ Cota do Spotify esgotada. Tente novamente em ${formatWaitTime(remaining)}.`;
+    tracksErrorEl.textContent = isQuotaExceeded
+      ? `⚠️ Cota de faixas do Spotify esgotada (apps pessoais tem uma cota baixa e sem prazo divulgado de reset). Tentando de novo em ${formatWaitTime(remaining)} - pode precisar de mais tempo ainda.`
+      : `⚠️ Muitas requisições ao Spotify agora. Tente novamente em ${formatWaitTime(remaining)}.`;
     tracksRetryBtn.classList.add("hidden");
   };
 
@@ -716,7 +723,9 @@ async function loadAlbumTracks(album, { forceRefresh = false } = {}) {
     if (!tracksRes.ok) {
       if (tracksRes.status === 429) {
         const retryAfter = Number(tracksRes.headers.get("Retry-After")) || null;
-        setCooldown(retryAfter || UNKNOWN_COOLDOWN_SECONDS);
+        const body = await tracksRes.json().catch(() => null);
+        const isQuotaExceeded = body?.error?.reason === "QUOTA_EXCEEDED";
+        setCooldown(retryAfter || UNKNOWN_COOLDOWN_SECONDS, { isQuotaExceeded });
         throw new Error("RATE_LIMITED");
       }
       throw new Error(`HTTP_${tracksRes.status}`);
@@ -767,12 +776,14 @@ checkLikedBtn.onclick = async () => {
     const containsRes = await spotifyFetch(
       `https://api.spotify.com/v1/me/tracks/contains?ids=${trackIds.join(",")}`,
       {},
-      5
+      1
     );
     if (containsRes.ok) {
       currentSavedFlags = await containsRes.json();
       renderTrackList(currentTracks, currentSavedFlags);
       checkLikedBtn.classList.add("hidden");
+    } else if (containsRes.status === 429) {
+      alert("Cota do Spotify esgotada pra essa verificação agora. Tente de novo mais tarde.");
     } else {
       alert("Não foi possível verificar as faixas curtidas agora.");
     }
