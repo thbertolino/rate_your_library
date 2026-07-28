@@ -32,21 +32,6 @@ const CLIENT_ID = "d7ae9370ca554540a1e671eda02ff844";
 // (calculado em runtime pra funcionar tanto local quanto no GitHub Pages).
 const REDIRECT_URI = window.location.origin + window.location.pathname;
 
-// Um cooldown de rate-limit e sobre a cota do APP (Client ID) que fez a
-// chamada, nao do usuario. Se trocamos de app (novo Client ID, cota nova em
-// folha), um cooldown salvo do app anterior fica sem sentido e so bloqueia
-// tentativas que agora podem funcionar - por isso ele e limpo automaticamente
-// quando o Client ID muda.
-(function clearStaleCooldownOnClientChange() {
-  const LAST_CLIENT_ID_KEY = "ryl_last_client_id";
-  const lastClientId = localStorage.getItem(LAST_CLIENT_ID_KEY);
-  if (lastClientId !== CLIENT_ID) {
-    localStorage.removeItem("ryl_rate_limit_cooldown_until");
-    localStorage.removeItem("ryl_rate_limit_is_quota");
-    localStorage.setItem(LAST_CLIENT_ID_KEY, CLIENT_ID);
-  }
-})();
-
 let allAlbums = []; // { album, addedAt } sorted alphabetically by artist
 let artists = []; // [{ id, name, imageUrl, albums: [album,...] }] sorted alphabetically
 let ratingsCache = {}; // albumId -> { rating, listened, ... }
@@ -650,53 +635,6 @@ function saveTrackListToCache(albumId, tracks) {
   }
 }
 
-// O Spotify documenta que apps em Development Mode tem uma COTA (nao so um
-// limite de velocidade) por "bucket" de endpoints, com reason "QUOTA_EXCEEDED"
-// - diferente de um rate limit comum, o periodo de reset nao e divulgado e
-// pode ser bem mais que minutos. Sem Retry-After pra guiar, assumimos 1 hora
-// como um chute mais realista (5 minutos nao foi suficiente na pratica).
-const UNKNOWN_COOLDOWN_SECONDS = 60 * 60;
-const RATE_LIMIT_COOLDOWN_KEY = "ryl_rate_limit_cooldown_until";
-const RATE_LIMIT_QUOTA_KEY = "ryl_rate_limit_is_quota";
-let cooldownIntervalId = null;
-
-function getCooldownRemainingSeconds() {
-  const until = Number(localStorage.getItem(RATE_LIMIT_COOLDOWN_KEY) || 0);
-  return Math.max(0, Math.ceil((until - Date.now()) / 1000));
-}
-
-function setCooldown(seconds, { isQuotaExceeded = false } = {}) {
-  localStorage.setItem(RATE_LIMIT_COOLDOWN_KEY, String(Date.now() + seconds * 1000));
-  localStorage.setItem(RATE_LIMIT_QUOTA_KEY, isQuotaExceeded ? "1" : "0");
-}
-
-// Mostra (e mantem atualizada, contando pra baixo) a mensagem de espera, sem
-// tentar de novo sozinho - so reabilita o botao quando o tempo acabar. Assim
-// a gente para de gastar a cota que ja esta estourada em tentativas inuteis.
-function showCooldownCountdown() {
-  if (cooldownIntervalId) clearInterval(cooldownIntervalId);
-  const isQuotaExceeded = localStorage.getItem(RATE_LIMIT_QUOTA_KEY) === "1";
-
-  const tick = () => {
-    const remaining = getCooldownRemainingSeconds();
-    if (remaining <= 0) {
-      clearInterval(cooldownIntervalId);
-      cooldownIntervalId = null;
-      tracksErrorEl.textContent = "Pode tentar de novo agora.";
-      tracksRetryBtn.classList.remove("hidden");
-      return;
-    }
-    tracksErrorEl.textContent = isQuotaExceeded
-      ? `⚠️ Cota de faixas do Spotify esgotada (apps pessoais tem uma cota baixa e sem prazo divulgado de reset). Tentando de novo em ${formatWaitTime(remaining)} - pode precisar de mais tempo ainda.`
-      : `⚠️ Muitas requisições ao Spotify agora. Tente novamente em ${formatWaitTime(remaining)}.`;
-    tracksRetryBtn.classList.add("hidden");
-  };
-
-  tick();
-  cooldownIntervalId = setInterval(tick, 1000);
-  tracksErrorEl.classList.remove("hidden");
-}
-
 // Uma vez que as faixas de um album carregam com sucesso, ficam salvas no
 // navegador - reabrir o mesmo album (ou ver de novo mais tarde) nao pede
 // nada ao Spotify, so quando o usuario pedir "Atualizar faixas".
@@ -706,10 +644,6 @@ async function loadAlbumTracks(album, { forceRefresh = false } = {}) {
   tracksRetryBtn.classList.add("hidden");
   checkLikedBtn.classList.add("hidden");
   refreshTracksBtn.classList.add("hidden");
-  if (cooldownIntervalId) {
-    clearInterval(cooldownIntervalId);
-    cooldownIntervalId = null;
-  }
 
   const cached = !forceRefresh ? loadTracksCache()[album.id] : null;
   if (cached) {
@@ -722,26 +656,15 @@ async function loadAlbumTracks(album, { forceRefresh = false } = {}) {
     return;
   }
 
-  // Ja sabemos que a cota esta estourada - nem tenta, so mostra a contagem.
-  if (getCooldownRemainingSeconds() > 0) {
-    showCooldownCountdown();
-    return;
-  }
-
   tracksLoadingEl.classList.remove("hidden");
 
   try {
-    // So 1 tentativa: com uma cota provavelmente esgotada por um bom tempo,
-    // repetir rapido so soma tentativas inuteis (ja vimos isso acontecer).
-    const tracksRes = await spotifyFetch(`https://api.spotify.com/v1/albums/${album.id}/tracks?limit=50`, {}, 1);
+    const tracksRes = await spotifyFetch(`https://api.spotify.com/v1/albums/${album.id}/tracks?limit=50`, {}, 3);
 
     if (!tracksRes.ok) {
       if (tracksRes.status === 429) {
         const retryAfter = Number(tracksRes.headers.get("Retry-After")) || null;
-        const body = await tracksRes.json().catch(() => null);
-        const isQuotaExceeded = body?.error?.reason === "QUOTA_EXCEEDED";
-        setCooldown(retryAfter || UNKNOWN_COOLDOWN_SECONDS, { isQuotaExceeded });
-        throw new Error("RATE_LIMITED");
+        throw Object.assign(new Error("RATE_LIMITED"), { retryAfter });
       }
       throw new Error(`HTTP_${tracksRes.status}`);
     }
@@ -757,13 +680,12 @@ async function loadAlbumTracks(album, { forceRefresh = false } = {}) {
     renderAlbumRatingSummary(album);
   } catch (err) {
     console.error("Erro ao carregar faixas:", err);
-    if (err.message === "RATE_LIMITED") {
-      showCooldownCountdown();
-    } else {
-      tracksErrorEl.textContent = "Não foi possível carregar as faixas desse álbum.";
-      tracksErrorEl.classList.remove("hidden");
-      tracksRetryBtn.classList.remove("hidden");
-    }
+    tracksErrorEl.textContent =
+      err.message === "RATE_LIMITED"
+        ? `⚠️ Muitas requisições ao Spotify agora${err.retryAfter ? ` (tente de novo em ${formatWaitTime(err.retryAfter)})` : ""}. Toque em "Tentar novamente".`
+        : "Não foi possível carregar as faixas desse álbum.";
+    tracksErrorEl.classList.remove("hidden");
+    tracksRetryBtn.classList.remove("hidden");
   } finally {
     tracksLoadingEl.classList.add("hidden");
   }
