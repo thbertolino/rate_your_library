@@ -65,6 +65,8 @@ const logoutBtn = el("logout-btn");
 const searchInput = el("search-input");
 const artistListEl = el("artist-list");
 const artistPaginationEl = el("artist-pagination");
+const librarySyncNoteEl = el("library-sync-note");
+const refreshLibraryBtn = el("refresh-library-btn");
 const libraryLoadingEl = el("library-loading");
 const libraryEmptyEl = el("library-empty");
 
@@ -244,24 +246,62 @@ function sortAlbumItems(items) {
   });
 }
 
-// Busca todas as paginas de albuns salvos. Chama onProgress a cada pagina
-// (so pra atualizar o texto de "carregando"), mas so devolve o resultado
-// completo no final: renderizar a lista alfabetica aos poucos faz os itens
-// já exibidos pularem de posição conforme mais dados chegam, o que fica ruim.
+// So guarda os campos que o app realmente usa - o objeto "album" completo
+// que o Spotify devolve traz bastante coisa que nao usamos (available_markets,
+// copyrights, genres, faixas...) e isso pesa demais pra guardar no localStorage
+// com quase mil albuns.
+function leanAlbumItem({ album }) {
+  return {
+    album: {
+      id: album.id,
+      name: album.name,
+      images: album.images,
+      artists: album.artists.map((a) => ({ id: a.id, name: a.name })),
+      external_urls: { spotify: album.external_urls?.spotify },
+    },
+  };
+}
+
+// Busca todas as paginas de albuns salvos, com uma pausa entre cada pagina
+// pra nao estourar a cota (baixa) desse app. Com bibliotecas grandes (varias
+// centenas de albuns) isso significa varias dezenas de chamadas - por isso o
+// resultado e cacheado (ver LIBRARY_CACHE_KEY) e so refeito quando pedido.
 async function fetchAllSavedAlbums(onProgress) {
   const items = [];
   let url = "https://api.spotify.com/v1/me/albums?limit=50";
+  let isFirstPage = true;
 
   while (url) {
-    const res = await spotifyFetch(url);
+    if (!isFirstPage) await new Promise((resolve) => setTimeout(resolve, 300));
+    isFirstPage = false;
+
+    const res = await spotifyFetch(url, {}, 5);
     if (!res.ok) throw new Error("FAILED_ALBUMS");
     const data = await res.json();
-    items.push(...data.items);
+    items.push(...data.items.map(leanAlbumItem));
     if (onProgress) onProgress(items.length);
     url = data.next;
   }
 
   return sortAlbumItems(items);
+}
+
+const LIBRARY_CACHE_KEY = "ryl_library_cache_v1";
+
+function loadLibraryCache() {
+  try {
+    return JSON.parse(localStorage.getItem(LIBRARY_CACHE_KEY) || "null");
+  } catch {
+    return null;
+  }
+}
+
+function saveLibraryCache(items) {
+  try {
+    localStorage.setItem(LIBRARY_CACHE_KEY, JSON.stringify({ items, fetchedAt: new Date().toISOString() }));
+  } catch (err) {
+    console.warn("Não foi possível salvar cache da biblioteca:", err);
+  }
 }
 
 function albumBadgeHtml(albumId) {
@@ -665,27 +705,67 @@ async function start() {
   }
 
   showView("artists");
+
+  try {
+    await loadRatings();
+    await loadLibrary({ forceRefresh: false });
+  } catch (err) {
+    console.error("Erro ao carregar biblioteca:", err);
+    libraryEmptyEl.textContent = "Não foi possível carregar sua biblioteca. Tente novamente.";
+    libraryEmptyEl.classList.remove("hidden");
+  }
+}
+
+// Usa o que ja tiver em cache (instantaneo, sem chamada nenhuma ao Spotify).
+// So busca de verdade na primeira vez, ou quando o usuario pede pra atualizar
+// no botao - assim a cota baixa desse app so precisa aguentar isso raramente,
+// nao toda vez que a biblioteca abre.
+async function loadLibrary({ forceRefresh }) {
+  const cached = !forceRefresh ? loadLibraryCache() : null;
+
+  if (cached) {
+    allAlbums = cached.items;
+    buildArtistGroups();
+    renderArtistList();
+    updateLibrarySyncNote(cached.fetchedAt);
+    return;
+  }
+
   libraryLoadingEl.classList.remove("hidden");
   const loadingLabelEl = libraryLoadingEl.querySelector("span");
   const originalLoadingLabel = loadingLabelEl.textContent;
 
   try {
-    await loadRatings();
-
     allAlbums = await fetchAllSavedAlbums((countSoFar) => {
       loadingLabelEl.textContent = `Carregando sua biblioteca... (${countSoFar} álbuns)`;
     });
 
     buildArtistGroups();
-    renderArtistList(); // ja dispara a busca de fotos so da pagina atual
-  } catch (err) {
-    console.error("Erro ao carregar biblioteca:", err);
-    libraryEmptyEl.textContent = "Não foi possível carregar sua biblioteca. Tente novamente.";
-    libraryEmptyEl.classList.remove("hidden");
+    renderArtistList();
+    saveLibraryCache(allAlbums);
+    updateLibrarySyncNote(new Date().toISOString());
   } finally {
     loadingLabelEl.textContent = originalLoadingLabel;
     libraryLoadingEl.classList.add("hidden");
   }
 }
+
+function updateLibrarySyncNote(isoDate) {
+  if (!librarySyncNoteEl) return;
+  const date = new Date(isoDate);
+  librarySyncNoteEl.textContent = `Biblioteca sincronizada em ${date.toLocaleDateString("pt-BR")} às ${date.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}.`;
+}
+
+refreshLibraryBtn.onclick = async () => {
+  refreshLibraryBtn.disabled = true;
+  try {
+    await loadLibrary({ forceRefresh: true });
+  } catch (err) {
+    console.error("Erro ao atualizar biblioteca:", err);
+    alert("Não foi possível atualizar sua biblioteca agora. Tente novamente em instantes.");
+  } finally {
+    refreshLibraryBtn.disabled = false;
+  }
+};
 
 start();
