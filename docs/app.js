@@ -635,6 +635,46 @@ function saveTrackListToCache(albumId, tracks) {
   }
 }
 
+// Quando o Spotify nao manda Retry-After no 429, nao e um limite curto e
+// previsivel - e uma cota mais ampla (provavelmente por hora) estourada.
+// Chutar um numero pequeno so faz o app bater de novo e continuar falhando.
+const UNKNOWN_COOLDOWN_SECONDS = 5 * 60;
+const RATE_LIMIT_COOLDOWN_KEY = "ryl_rate_limit_cooldown_until";
+let cooldownIntervalId = null;
+
+function getCooldownRemainingSeconds() {
+  const until = Number(localStorage.getItem(RATE_LIMIT_COOLDOWN_KEY) || 0);
+  return Math.max(0, Math.ceil((until - Date.now()) / 1000));
+}
+
+function setCooldown(seconds) {
+  localStorage.setItem(RATE_LIMIT_COOLDOWN_KEY, String(Date.now() + seconds * 1000));
+}
+
+// Mostra (e mantem atualizada, contando pra baixo) a mensagem de espera, sem
+// tentar de novo sozinho - so reabilita o botao quando o tempo acabar. Assim
+// a gente para de gastar a cota que ja esta estourada em tentativas inuteis.
+function showCooldownCountdown() {
+  if (cooldownIntervalId) clearInterval(cooldownIntervalId);
+
+  const tick = () => {
+    const remaining = getCooldownRemainingSeconds();
+    if (remaining <= 0) {
+      clearInterval(cooldownIntervalId);
+      cooldownIntervalId = null;
+      tracksErrorEl.textContent = "Pode tentar de novo agora.";
+      tracksRetryBtn.classList.remove("hidden");
+      return;
+    }
+    tracksErrorEl.textContent = `⚠️ Cota do Spotify esgotada. Tente novamente em ${formatWaitTime(remaining)}.`;
+    tracksRetryBtn.classList.add("hidden");
+  };
+
+  tick();
+  cooldownIntervalId = setInterval(tick, 1000);
+  tracksErrorEl.classList.remove("hidden");
+}
+
 // Uma vez que as faixas de um album carregam com sucesso, ficam salvas no
 // navegador - reabrir o mesmo album (ou ver de novo mais tarde) nao pede
 // nada ao Spotify, so quando o usuario pedir "Atualizar faixas".
@@ -644,6 +684,10 @@ async function loadAlbumTracks(album, { forceRefresh = false } = {}) {
   tracksRetryBtn.classList.add("hidden");
   checkLikedBtn.classList.add("hidden");
   refreshTracksBtn.classList.add("hidden");
+  if (cooldownIntervalId) {
+    clearInterval(cooldownIntervalId);
+    cooldownIntervalId = null;
+  }
 
   const cached = !forceRefresh ? loadTracksCache()[album.id] : null;
   if (cached) {
@@ -656,17 +700,24 @@ async function loadAlbumTracks(album, { forceRefresh = false } = {}) {
     return;
   }
 
+  // Ja sabemos que a cota esta estourada - nem tenta, so mostra a contagem.
+  if (getCooldownRemainingSeconds() > 0) {
+    showCooldownCountdown();
+    return;
+  }
+
   tracksLoadingEl.classList.remove("hidden");
 
   try {
-    const tracksRes = await spotifyFetch(`https://api.spotify.com/v1/albums/${album.id}/tracks?limit=50`, {}, 5);
+    // So 1 tentativa: com uma cota provavelmente esgotada por um bom tempo,
+    // repetir rapido so soma tentativas inuteis (ja vimos isso acontecer).
+    const tracksRes = await spotifyFetch(`https://api.spotify.com/v1/albums/${album.id}/tracks?limit=50`, {}, 1);
 
     if (!tracksRes.ok) {
       if (tracksRes.status === 429) {
         const retryAfter = Number(tracksRes.headers.get("Retry-After")) || null;
-        const err = new Error("RATE_LIMITED");
-        err.retryAfter = retryAfter;
-        throw err;
+        setCooldown(retryAfter || UNKNOWN_COOLDOWN_SECONDS);
+        throw new Error("RATE_LIMITED");
       }
       throw new Error(`HTTP_${tracksRes.status}`);
     }
@@ -683,14 +734,12 @@ async function loadAlbumTracks(album, { forceRefresh = false } = {}) {
   } catch (err) {
     console.error("Erro ao carregar faixas:", err);
     if (err.message === "RATE_LIMITED") {
-      tracksErrorEl.textContent = err.retryAfter
-        ? `⚠️ Muitas requisições ao Spotify agora. O próprio Spotify pediu pra esperar ${formatWaitTime(err.retryAfter)} antes de tentar de novo.`
-        : "⚠️ Muitas requisições ao Spotify agora. Aguarde um instante e tente de novo.";
+      showCooldownCountdown();
     } else {
       tracksErrorEl.textContent = "Não foi possível carregar as faixas desse álbum.";
+      tracksErrorEl.classList.remove("hidden");
+      tracksRetryBtn.classList.remove("hidden");
     }
-    tracksErrorEl.classList.remove("hidden");
-    tracksRetryBtn.classList.remove("hidden");
   } finally {
     tracksLoadingEl.classList.add("hidden");
   }
