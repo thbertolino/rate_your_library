@@ -24,7 +24,7 @@ const firebaseConfig = {
 const firebaseApp = initializeApp(firebaseConfig);
 const db = getFirestore(firebaseApp);
 
-const SCOPES = "user-library-read user-library-modify";
+const SCOPES = "user-library-read";
 
 // Nao e segredo (fluxo Authorization Code + PKCE, client publico).
 const CLIENT_ID = "d7ae9370ca554540a1e671eda02ff844";
@@ -38,7 +38,7 @@ let ratingsCache = {}; // albumId -> { rating, listened, ... }
 let currentUserId = null;
 let currentAlbum = null; // album object currently open in detail view
 let currentArtist = null; // artist object currently open
-let albumOpenedFrom = "artist"; // "artist" | "ratings" - where back-btn on album view should go
+let albumOpenedFrom = "artist"; // "artist" | "ratings" | "artists" - where back-btn on album view should go
 let artistPage = 1;
 
 const DESKTOP_QUERY = window.matchMedia("(min-width: 860px)");
@@ -63,6 +63,8 @@ const tabbar = el("tabbar");
 const loginBtn = el("login-btn");
 const logoutBtn = el("logout-btn");
 const searchInput = el("search-input");
+const randomUnheardBtn = el("random-unheard-btn");
+const randomHeardBtn = el("random-heard-btn");
 const artistListEl = el("artist-list");
 const artistPaginationEl = el("artist-pagination");
 const librarySyncNoteEl = el("library-sync-note");
@@ -85,7 +87,6 @@ const listenedCheckbox = el("listened-checkbox");
 const tracksLoadingEl = el("tracks-loading");
 const tracksErrorEl = el("tracks-error");
 const tracksRetryBtn = el("tracks-retry-btn");
-const checkLikedBtn = el("check-liked-btn");
 const trackListEl = el("track-list");
 const refreshTracksBtn = el("refresh-tracks-btn");
 
@@ -119,7 +120,9 @@ document.querySelectorAll(".tab-btn").forEach((btn) => {
 backToArtistsBtn.onclick = () => showView("artists");
 
 backBtn.onclick = () => {
-  showView(albumOpenedFrom === "ratings" ? "ratings" : "artist");
+  if (albumOpenedFrom === "ratings") showView("ratings");
+  else if (albumOpenedFrom === "artists") showView("artists");
+  else showView("artist");
 };
 
 logoutBtn.onclick = () => {
@@ -470,6 +473,32 @@ DESKTOP_QUERY.addEventListener("change", () => {
   if (!views.artists.classList.contains("hidden")) renderArtistList(searchInput.value);
 });
 
+function pickRandomAlbum(matches) {
+  const candidates = allAlbums.filter(({ album }) => matches(album));
+  if (!candidates.length) return null;
+  return candidates[Math.floor(Math.random() * candidates.length)].album;
+}
+
+randomUnheardBtn.onclick = () => {
+  const album = pickRandomAlbum((album) => !ratingsCache[album.id]?.listened);
+  if (!album) {
+    alert("Todos os seus álbuns já estão marcados como ouvidos!");
+    return;
+  }
+  albumOpenedFrom = "artists";
+  openAlbum(album);
+};
+
+randomHeardBtn.onclick = () => {
+  const album = pickRandomAlbum((album) => !!ratingsCache[album.id]?.listened);
+  if (!album) {
+    alert("Você ainda não marcou nenhum álbum como ouvido.");
+    return;
+  }
+  albumOpenedFrom = "artists";
+  openAlbum(album);
+};
+
 /* --------------------------------------------------
    RATINGS (Firestore)
 -------------------------------------------------- */
@@ -617,7 +646,6 @@ function renderAlbumRatingSummary(album) {
 }
 
 let currentTracks = [];
-let currentSavedFlags = [];
 
 // So guarda id/nome/numero da faixa - o resto do objeto que o Spotify manda
 // (artists, disc_number, external_urls, preview_url etc.) o app nao usa.
@@ -652,7 +680,6 @@ async function loadAlbumTracks(album, { forceRefresh = false } = {}) {
   trackListEl.innerHTML = "";
   tracksErrorEl.classList.add("hidden");
   tracksRetryBtn.classList.add("hidden");
-  checkLikedBtn.classList.add("hidden");
   refreshTracksBtn.classList.add("hidden");
 
   // O album ja veio com as faixas embutidas (parte da resposta de /me/albums,
@@ -661,9 +688,7 @@ async function loadAlbumTracks(album, { forceRefresh = false } = {}) {
   const embeddedTracks = album.tracks;
   if (!forceRefresh && embeddedTracks && embeddedTracks.items.length >= embeddedTracks.total) {
     currentTracks = embeddedTracks.items;
-    currentSavedFlags = currentTracks.map(() => null);
-    renderTrackList(currentTracks, currentSavedFlags);
-    checkLikedBtn.classList.toggle("hidden", currentTracks.length === 0);
+    renderTrackList(currentTracks);
     refreshTracksBtn.classList.remove("hidden");
     saveTrackListToCache(album.id, currentTracks);
     renderAlbumRatingSummary(album);
@@ -673,9 +698,7 @@ async function loadAlbumTracks(album, { forceRefresh = false } = {}) {
   const cached = !forceRefresh ? loadTracksCache()[album.id] : null;
   if (cached) {
     currentTracks = cached.tracks;
-    currentSavedFlags = currentTracks.map(() => null);
-    renderTrackList(currentTracks, currentSavedFlags);
-    checkLikedBtn.classList.toggle("hidden", currentTracks.length === 0);
+    renderTrackList(currentTracks);
     refreshTracksBtn.classList.remove("hidden");
     renderAlbumRatingSummary(album);
     return;
@@ -696,10 +719,8 @@ async function loadAlbumTracks(album, { forceRefresh = false } = {}) {
 
     const tracksData = await tracksRes.json();
     currentTracks = (tracksData.items || []).map(leanTrack);
-    currentSavedFlags = currentTracks.map(() => null); // null = ainda nao verificado
 
-    renderTrackList(currentTracks, currentSavedFlags);
-    checkLikedBtn.classList.toggle("hidden", currentTracks.length === 0);
+    renderTrackList(currentTracks);
     refreshTracksBtn.classList.toggle("hidden", currentTracks.length === 0);
     saveTrackListToCache(album.id, currentTracks);
     renderAlbumRatingSummary(album);
@@ -724,41 +745,7 @@ refreshTracksBtn.onclick = () => {
   if (currentAlbum) loadAlbumTracks(currentAlbum, { forceRefresh: true });
 };
 
-// A checagem de "quais faixas ja curti" e uma segunda chamada por album -
-// deixamos sob demanda (o usuario pede clicando) em vez de automatica, pra
-// nao dobrar o numero de requisicoes so de abrir um album.
-checkLikedBtn.onclick = async () => {
-  const trackIds = currentTracks.map((t) => t.id).filter(Boolean);
-  if (!trackIds.length) return;
-
-  checkLikedBtn.disabled = true;
-  checkLikedBtn.textContent = "Verificando...";
-
-  try {
-    const containsRes = await spotifyFetch(
-      `https://api.spotify.com/v1/me/tracks/contains?ids=${trackIds.join(",")}`,
-      {},
-      1
-    );
-    if (containsRes.ok) {
-      currentSavedFlags = await containsRes.json();
-      renderTrackList(currentTracks, currentSavedFlags);
-      checkLikedBtn.classList.add("hidden");
-    } else if (containsRes.status === 429) {
-      alert("Cota do Spotify esgotada pra essa verificação agora. Tente de novo mais tarde.");
-    } else {
-      alert("Não foi possível verificar as faixas curtidas agora.");
-    }
-  } catch (err) {
-    console.error("Erro ao verificar faixas curtidas:", err);
-    alert("Não foi possível verificar as faixas curtidas agora.");
-  } finally {
-    checkLikedBtn.disabled = false;
-    checkLikedBtn.textContent = "🤍 Ver quais já curti";
-  }
-};
-
-function renderTrackList(tracks, savedFlags) {
+function renderTrackList(tracks) {
   trackListEl.innerHTML = "";
   const trackRatings = ratingsCache[currentAlbum?.id]?.trackRatings || {};
 
@@ -777,25 +764,7 @@ function renderTrackList(tracks, savedFlags) {
     nameSpan.className = "track-name";
     nameSpan.textContent = track.name;
 
-    const isUnknown = savedFlags[i] === null || savedFlags[i] === undefined;
-
-    const heartBtn = document.createElement("button");
-    heartBtn.type = "button";
-    heartBtn.className = `track-saved ${savedFlags[i] ? "on" : ""}`;
-    heartBtn.style.background = "transparent";
-    heartBtn.style.border = "none";
-    heartBtn.style.cursor = isUnknown ? "default" : "pointer";
-    heartBtn.disabled = isUnknown;
-    heartBtn.title = isUnknown
-      ? 'Toque em "Ver quais já curti" acima pra verificar'
-      : savedFlags[i]
-      ? "Salva na sua biblioteca (clique para remover)"
-      : "Não salva (clique para adicionar)";
-    heartBtn.textContent = isUnknown ? "🤍" : savedFlags[i] ? "💚" : "🤍";
-    heartBtn.style.opacity = isUnknown ? "0.35" : "1";
-    if (!isUnknown) heartBtn.onclick = () => toggleTrackSaved(track.id, heartBtn, savedFlags, i);
-
-    mainRow.append(numberSpan, nameSpan, heartBtn);
+    mainRow.append(numberSpan, nameSpan);
 
     const starRow = document.createElement("div");
     starRow.className = "track-star-picker";
@@ -830,47 +799,6 @@ async function handleTrackStarClick(trackId, value, starRow) {
   await saveTrackRating(currentAlbum, trackId, newRating);
   renderAlbumRatingSummary(currentAlbum);
   refreshBadgesEverywhere();
-}
-
-async function toggleTrackSaved(trackId, heartBtn, savedFlags, index) {
-  if (!trackId || heartBtn.disabled) return;
-  heartBtn.disabled = true;
-
-  const wasSaved = savedFlags[index];
-  try {
-    const res = await spotifyFetch(`https://api.spotify.com/v1/me/tracks?ids=${trackId}`, {
-      method: wasSaved ? "DELETE" : "PUT",
-    });
-
-    if (res.status === 403) {
-      // Token foi emitido antes de pedirmos a permissão user-library-modify.
-      const shouldRelogin = confirm(
-        "Sua sessão atual não tem permissão para curtir/descurtir músicas.\n\n" +
-        "Isso acontece se você fez login antes dessa função existir. " +
-        "Deseja sair e entrar novamente para conceder a permissão?"
-      );
-      if (shouldRelogin) {
-        localStorage.removeItem("access_token");
-        localStorage.removeItem("refresh_token");
-        window.location.reload();
-      }
-      return;
-    }
-
-    if (!res.ok) throw new Error("TOGGLE_FAILED");
-
-    savedFlags[index] = !wasSaved;
-    heartBtn.classList.toggle("on", savedFlags[index]);
-    heartBtn.textContent = savedFlags[index] ? "💚" : "🤍";
-    heartBtn.title = savedFlags[index]
-      ? "Salva na sua biblioteca (clique para remover)"
-      : "Não salva (clique para adicionar)";
-  } catch (err) {
-    console.error("Erro ao atualizar faixa salva:", err);
-    alert("Não foi possível atualizar essa faixa na sua biblioteca.");
-  } finally {
-    heartBtn.disabled = false;
-  }
 }
 
 function refreshBadgesEverywhere() {

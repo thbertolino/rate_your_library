@@ -488,16 +488,6 @@ main {
   white-space: nowrap;
 }
 
-.track-saved {
-  font-size: 0.9rem;
-  flex-shrink: 0;
-  opacity: 0.35;
-}
-
-.track-saved.on {
-  opacity: 1;
-}
-
 .track-star-picker {
   display: flex;
   gap: 3px;

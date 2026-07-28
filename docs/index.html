@@ -40,6 +40,16 @@
               placeholder="Buscar artista..." autocomplete="off" autocorrect="off"
               autocapitalize="off" spellcheck="false" name="rylsearch_no_autofill" />
           </form>
+
+          <div style="display:flex;gap:8px;margin:12px 0 4px;">
+            <button id="random-unheard-btn" class="primary-btn" style="flex:1;">
+              <span>🎲</span><span>Ainda não ouvi</span>
+            </button>
+            <button id="random-heard-btn" class="primary-btn secondary-btn" style="flex:1;">
+              <span>🎲</span><span>Já ouvi</span>
+            </button>
+          </div>
+
           <div id="library-loading" class="loading hidden">
             <div class="loading-dot"></div><div class="loading-dot"></div><div class="loading-dot"></div>
             <span>Carregando sua biblioteca...</span>
@@ -87,7 +97,6 @@
             </div>
             <p id="tracks-error" class="empty-state hidden"></p>
             <button id="tracks-retry-btn" class="back-btn hidden" style="align-self:center;">Tentar novamente</button>
-            <button id="check-liked-btn" class="back-btn hidden" style="align-self:center;">🤍 Ver quais já curti</button>
             <ul id="track-list" class="track-list"></ul>
             <button id="refresh-tracks-btn" class="back-btn hidden" style="align-self:center;margin-top:6px;">🔄 Atualizar faixas</button>
           </div>
