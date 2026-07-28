@@ -87,6 +87,7 @@ const tracksErrorEl = el("tracks-error");
 const tracksRetryBtn = el("tracks-retry-btn");
 const checkLikedBtn = el("check-liked-btn");
 const trackListEl = el("track-list");
+const refreshTracksBtn = el("refresh-tracks-btn");
 
 const ratingsListEl = el("ratings-list");
 const ratingsEmptyEl = el("ratings-empty");
@@ -547,11 +548,52 @@ async function openAlbum(album) {
 let currentTracks = [];
 let currentSavedFlags = [];
 
-async function loadAlbumTracks(album) {
+// So guarda id/nome/numero da faixa - o resto do objeto que o Spotify manda
+// (artists, disc_number, external_urls, preview_url etc.) o app nao usa.
+function leanTrack(track) {
+  return { id: track.id, name: track.name, track_number: track.track_number };
+}
+
+const TRACKS_CACHE_KEY = "ryl_tracks_cache_v1";
+
+function loadTracksCache() {
+  try {
+    return JSON.parse(localStorage.getItem(TRACKS_CACHE_KEY) || "{}");
+  } catch {
+    return {};
+  }
+}
+
+function saveTrackListToCache(albumId, tracks) {
+  const cache = loadTracksCache();
+  cache[albumId] = { tracks, fetchedAt: new Date().toISOString() };
+  try {
+    localStorage.setItem(TRACKS_CACHE_KEY, JSON.stringify(cache));
+  } catch (err) {
+    console.warn("Não foi possível salvar cache de faixas:", err);
+  }
+}
+
+// Uma vez que as faixas de um album carregam com sucesso, ficam salvas no
+// navegador - reabrir o mesmo album (ou ver de novo mais tarde) nao pede
+// nada ao Spotify, so quando o usuario pedir "Atualizar faixas".
+async function loadAlbumTracks(album, { forceRefresh = false } = {}) {
   trackListEl.innerHTML = "";
   tracksErrorEl.classList.add("hidden");
   tracksRetryBtn.classList.add("hidden");
   checkLikedBtn.classList.add("hidden");
+  refreshTracksBtn.classList.add("hidden");
+
+  const cached = !forceRefresh ? loadTracksCache()[album.id] : null;
+  if (cached) {
+    currentTracks = cached.tracks;
+    currentSavedFlags = currentTracks.map(() => null);
+    renderTrackList(currentTracks, currentSavedFlags);
+    checkLikedBtn.classList.toggle("hidden", currentTracks.length === 0);
+    refreshTracksBtn.classList.remove("hidden");
+    return;
+  }
+
   tracksLoadingEl.classList.remove("hidden");
 
   try {
@@ -562,11 +604,13 @@ async function loadAlbumTracks(album) {
     }
 
     const tracksData = await tracksRes.json();
-    currentTracks = tracksData.items || [];
+    currentTracks = (tracksData.items || []).map(leanTrack);
     currentSavedFlags = currentTracks.map(() => null); // null = ainda nao verificado
 
     renderTrackList(currentTracks, currentSavedFlags);
     checkLikedBtn.classList.toggle("hidden", currentTracks.length === 0);
+    refreshTracksBtn.classList.toggle("hidden", currentTracks.length === 0);
+    saveTrackListToCache(album.id, currentTracks);
   } catch (err) {
     console.error("Erro ao carregar faixas:", err);
     tracksErrorEl.textContent =
@@ -581,7 +625,11 @@ async function loadAlbumTracks(album) {
 }
 
 tracksRetryBtn.onclick = () => {
-  if (currentAlbum) loadAlbumTracks(currentAlbum);
+  if (currentAlbum) loadAlbumTracks(currentAlbum, { forceRefresh: true });
+};
+
+refreshTracksBtn.onclick = () => {
+  if (currentAlbum) loadAlbumTracks(currentAlbum, { forceRefresh: true });
 };
 
 // A checagem de "quais faixas ja curti" e uma segunda chamada por album -
