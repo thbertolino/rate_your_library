@@ -32,6 +32,21 @@ const CLIENT_ID = "d7ae9370ca554540a1e671eda02ff844";
 // (calculado em runtime pra funcionar tanto local quanto no GitHub Pages).
 const REDIRECT_URI = window.location.origin + window.location.pathname;
 
+// Um cooldown de rate-limit e sobre a cota do APP (Client ID) que fez a
+// chamada, nao do usuario. Se trocamos de app (novo Client ID, cota nova em
+// folha), um cooldown salvo do app anterior fica sem sentido e so bloqueia
+// tentativas que agora podem funcionar - por isso ele e limpo automaticamente
+// quando o Client ID muda.
+(function clearStaleCooldownOnClientChange() {
+  const LAST_CLIENT_ID_KEY = "ryl_last_client_id";
+  const lastClientId = localStorage.getItem(LAST_CLIENT_ID_KEY);
+  if (lastClientId !== CLIENT_ID) {
+    localStorage.removeItem("ryl_rate_limit_cooldown_until");
+    localStorage.removeItem("ryl_rate_limit_is_quota");
+    localStorage.setItem(LAST_CLIENT_ID_KEY, CLIENT_ID);
+  }
+})();
+
 let allAlbums = []; // { album, addedAt } sorted alphabetically by artist
 let artists = []; // [{ id, name, imageUrl, albums: [album,...] }] sorted alphabetically
 let ratingsCache = {}; // albumId -> { rating, listened, ... }
