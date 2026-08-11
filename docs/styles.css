@@ -332,12 +332,6 @@ main {
   font-size: 0.9rem;
 }
 
-.badge-stars {
-  font-size: 0.75rem;
-  color: var(--star-gold);
-  white-space: nowrap;
-}
-
 .empty-state {
   text-align: center;
   color: var(--text-muted);
@@ -376,28 +370,6 @@ main {
   height: 100%;
   object-fit: cover;
   display: block;
-}
-
-.star-picker {
-  display: flex;
-  justify-content: center;
-  gap: 6px;
-  font-size: 1.8rem;
-  margin: 10px 0;
-}
-
-.star-picker .star {
-  cursor: pointer;
-  color: rgba(148, 163, 184, 0.35);
-  transition: transform 0.1s ease, color 0.15s ease;
-}
-
-.star-picker .star.filled {
-  color: var(--star-gold);
-}
-
-.star-picker .star:hover {
-  transform: scale(1.15);
 }
 
 .listened-toggle {
@@ -486,27 +458,6 @@ main {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.track-star-picker {
-  display: flex;
-  gap: 3px;
-  padding-left: 30px;
-  font-size: 1rem;
-}
-
-.track-star-picker .star {
-  cursor: pointer;
-  color: rgba(148, 163, 184, 0.35);
-  transition: transform 0.1s ease, color 0.15s ease;
-}
-
-.track-star-picker .star.filled {
-  color: var(--star-gold);
-}
-
-.track-star-picker .star:hover {
-  transform: scale(1.15);
 }
 
 @media (min-width: 480px) {

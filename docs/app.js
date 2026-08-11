@@ -81,7 +81,6 @@ const albumDetailImg = el("album-detail-img");
 const albumDetailTitle = el("album-detail-title");
 const albumDetailArtist = el("album-detail-artist");
 const albumDetailLink = el("album-detail-link");
-const albumRatingSummaryEl = el("album-rating-summary");
 const listenedToggle = el("listened-toggle");
 const listenedCheckbox = el("listened-checkbox");
 const tracksLoadingEl = el("tracks-loading");
@@ -325,11 +324,7 @@ function saveLibraryCache(items) {
 function albumBadgeHtml(albumId) {
   const r = ratingsCache[albumId];
   if (!r) return "";
-  const listened = r.listened ? '<span class="badge-listened">✅</span>' : "";
-  const stars = r.rating
-    ? `<span class="badge-stars">${"★".repeat(Math.round(r.rating))} ${r.rating.toFixed(1)}</span>`
-    : "";
-  return listened + stars;
+  return r.listened ? '<span class="badge-listened">✅</span>' : "";
 }
 
 function buildArtistGroups() {
@@ -523,54 +518,16 @@ async function loadRatings() {
   });
 }
 
-function basePayloadFor(album, existing) {
-  return {
+async function saveRating(album, { listened }) {
+  const existing = ratingsCache[album.id] || {};
+  const payload = {
     userId: currentUserId,
     albumId: album.id,
     name: album.name,
     artist: album.artists.map((a) => a.name).join(", "),
     imageUrl: album.images?.[0]?.url || "",
     spotifyUrl: album.external_urls?.spotify || "",
-    rating: existing.rating ?? 0,
-    trackRatings: existing.trackRatings ?? {},
-    listened: existing.listened ?? false,
-  };
-}
-
-async function saveRating(album, { listened }) {
-  const existing = ratingsCache[album.id] || {};
-  const payload = {
-    ...basePayloadFor(album, existing),
     listened: listened !== undefined ? listened : existing.listened ?? false,
-    updatedAt: new Date().toISOString(),
-  };
-
-  await setDoc(doc(db, "ratings", ratingDocId(currentUserId, album.id)), payload);
-  ratingsCache[album.id] = payload;
-}
-
-// A nota do album nao e mais escolhida direto: ela e a media das notas que
-// o usuario deu pras faixas individuais (so as que ja foram avaliadas).
-function computeAlbumRating(trackRatings) {
-  const values = Object.values(trackRatings).filter((v) => v > 0);
-  if (!values.length) return 0;
-  return values.reduce((sum, v) => sum + v, 0) / values.length;
-}
-
-async function saveTrackRating(album, trackId, newRating) {
-  const existing = ratingsCache[album.id] || {};
-  const trackRatings = { ...(existing.trackRatings || {}) };
-
-  if (newRating > 0) {
-    trackRatings[trackId] = newRating;
-  } else {
-    delete trackRatings[trackId];
-  }
-
-  const payload = {
-    ...basePayloadFor(album, existing),
-    trackRatings,
-    rating: computeAlbumRating(trackRatings),
     updatedAt: new Date().toISOString(),
   };
 
@@ -583,7 +540,7 @@ function renderRatingsView(filterText = "") {
   const term = filterText.trim().toLowerCase();
 
   const rated = Object.entries(ratingsCache)
-    .filter(([, r]) => r.rating > 0 || r.listened)
+    .filter(([, r]) => r.listened)
     .filter(
       ([, r]) => !term || (r.name || "").toLowerCase().includes(term) || (r.artist || "").toLowerCase().includes(term)
     )
@@ -634,28 +591,11 @@ async function openAlbum(album) {
   };
   albumDetailLink.href = album.external_urls?.spotify || "#";
 
-  const r = ratingsCache[album.id] || { rating: 0, listened: false };
-  renderAlbumRatingSummary(album);
+  const r = ratingsCache[album.id] || { listened: false };
   listenedCheckbox.checked = !!r.listened;
   listenedToggle.classList.toggle("on", !!r.listened);
 
   await loadAlbumTracks(album);
-}
-
-function renderAlbumRatingSummary(album) {
-  const r = ratingsCache[album.id] || {};
-  const trackRatings = r.trackRatings || {};
-  const ratedCount = Object.keys(trackRatings).length;
-  const totalCount = currentTracks.length || null;
-
-  if (!ratedCount) {
-    albumRatingSummaryEl.textContent = "Avalie as faixas abaixo para calcular a nota do álbum.";
-    return;
-  }
-
-  const stars = "★".repeat(Math.round(r.rating)) + "☆".repeat(5 - Math.round(r.rating));
-  const countLabel = totalCount ? `${ratedCount} de ${totalCount} faixas avaliadas` : `${ratedCount} faixas avaliadas`;
-  albumRatingSummaryEl.textContent = `${stars} ${r.rating.toFixed(1)} — ${countLabel}`;
 }
 
 let currentTracks = [];
@@ -704,7 +644,6 @@ async function loadAlbumTracks(album, { forceRefresh = false } = {}) {
     renderTrackList(currentTracks);
     refreshTracksBtn.classList.remove("hidden");
     saveTrackListToCache(album.id, currentTracks);
-    renderAlbumRatingSummary(album);
     return;
   }
 
@@ -713,7 +652,6 @@ async function loadAlbumTracks(album, { forceRefresh = false } = {}) {
     currentTracks = cached.tracks;
     renderTrackList(currentTracks);
     refreshTracksBtn.classList.remove("hidden");
-    renderAlbumRatingSummary(album);
     return;
   }
 
@@ -736,7 +674,6 @@ async function loadAlbumTracks(album, { forceRefresh = false } = {}) {
     renderTrackList(currentTracks);
     refreshTracksBtn.classList.toggle("hidden", currentTracks.length === 0);
     saveTrackListToCache(album.id, currentTracks);
-    renderAlbumRatingSummary(album);
   } catch (err) {
     console.error("Erro ao carregar faixas:", err);
     tracksErrorEl.textContent =
@@ -760,7 +697,6 @@ refreshTracksBtn.onclick = () => {
 
 function renderTrackList(tracks) {
   trackListEl.innerHTML = "";
-  const trackRatings = ratingsCache[currentAlbum?.id]?.trackRatings || {};
 
   tracks.forEach((track, i) => {
     const li = document.createElement("li");
@@ -778,40 +714,9 @@ function renderTrackList(tracks) {
     nameSpan.textContent = track.name;
 
     mainRow.append(numberSpan, nameSpan);
-
-    const starRow = document.createElement("div");
-    starRow.className = "track-star-picker";
-    const currentTrackRating = trackRatings[track.id] || 0;
-
-    for (let value = 1; value <= 5; value++) {
-      const starEl = document.createElement("span");
-      starEl.className = `star${value <= currentTrackRating ? " filled" : ""}`;
-      starEl.dataset.value = value;
-      starEl.textContent = "★";
-      starEl.onclick = () => handleTrackStarClick(track.id, value, starRow);
-      starRow.appendChild(starEl);
-    }
-
-    li.append(mainRow, starRow);
+    li.append(mainRow);
     trackListEl.appendChild(li);
   });
-}
-
-function setStarDisplayFor(container, rating) {
-  container.querySelectorAll(".star").forEach((starEl) => {
-    starEl.classList.toggle("filled", Number(starEl.dataset.value) <= rating);
-  });
-}
-
-async function handleTrackStarClick(trackId, value, starRow) {
-  if (!currentAlbum) return;
-  const current = ratingsCache[currentAlbum.id]?.trackRatings?.[trackId] || 0;
-  const newRating = value === current ? 0 : value; // toque na mesma estrela zera a nota da faixa
-
-  setStarDisplayFor(starRow, newRating);
-  await saveTrackRating(currentAlbum, trackId, newRating);
-  renderAlbumRatingSummary(currentAlbum);
-  refreshBadgesEverywhere();
 }
 
 function refreshBadgesEverywhere() {
