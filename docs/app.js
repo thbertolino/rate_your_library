@@ -414,13 +414,36 @@ function renderArtistAlbums(artist) {
   artist.albums.forEach((album) => {
     const li = document.createElement("li");
     li.className = "album-row";
-    li.innerHTML = `
-      <img src="${album.images?.[1]?.url || album.images?.[0]?.url || album.images?.[2]?.url || ""}" alt="" />
-      <div class="album-row-info">
-        <div class="album-row-title">${escapeHtml(album.name)}</div>
-      </div>
-      <div class="album-row-badges">${albumBadgeHtml(album.id)}</div>
-    `;
+
+    const img = document.createElement("img");
+    img.src = album.images?.[1]?.url || album.images?.[0]?.url || album.images?.[2]?.url || "";
+    img.alt = "";
+
+    const info = document.createElement("div");
+    info.className = "album-row-info";
+    const title = document.createElement("div");
+    title.className = "album-row-title";
+    title.textContent = album.name;
+    info.appendChild(title);
+
+    const badges = document.createElement("div");
+    badges.className = "album-row-badges";
+
+    const listened = !!ratingsCache[album.id]?.listened;
+    const toggleBtn = document.createElement("button");
+    toggleBtn.type = "button";
+    toggleBtn.className = `listened-quick-toggle ${listened ? "on" : ""}`;
+    toggleBtn.title = listened ? "Marcar como não ouvido" : "Marcar como já ouvido";
+    toggleBtn.textContent = listened ? "✅" : "⬜";
+    toggleBtn.onclick = async (e) => {
+      e.stopPropagation(); // nao abre o album, so alterna o "ja ouvi"
+      toggleBtn.disabled = true;
+      await saveRating(album, { listened: !listened });
+      refreshBadgesEverywhere();
+    };
+    badges.appendChild(toggleBtn);
+
+    li.append(img, info, badges);
     li.onclick = () => {
       albumOpenedFrom = "artist";
       openAlbum(album);
