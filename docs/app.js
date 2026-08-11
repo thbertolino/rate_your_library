@@ -117,12 +117,20 @@ document.querySelectorAll(".tab-btn").forEach((btn) => {
   };
 });
 
-backToArtistsBtn.onclick = () => showView("artists");
+backToArtistsBtn.onclick = () => {
+  renderArtistList(searchInput.value); // atualiza o destaque de "artista completo" ao voltar
+  showView("artists");
+};
 
 backBtn.onclick = () => {
-  if (albumOpenedFrom === "ratings") showView("ratings");
-  else if (albumOpenedFrom === "artists") showView("artists");
-  else showView("artist");
+  if (albumOpenedFrom === "ratings") {
+    showView("ratings");
+  } else if (albumOpenedFrom === "artists") {
+    renderArtistList(searchInput.value); // atualiza o destaque de "artista completo" ao voltar
+    showView("artists");
+  } else {
+    showView("artist");
+  }
 };
 
 logoutBtn.onclick = () => {
@@ -370,6 +378,10 @@ function renderPagination(container, page, totalPages, onChange) {
   container.append(prevBtn, label, nextBtn);
 }
 
+function isArtistFullyListened(artist) {
+  return artist.albums.length > 0 && artist.albums.every((album) => ratingsCache[album.id]?.listened);
+}
+
 function renderArtistList(filterText = "") {
   const term = filterText.trim().toLowerCase();
   artistListEl.innerHTML = "";
@@ -386,8 +398,10 @@ function renderArtistList(filterText = "") {
   const pageItems = filtered.slice(start, start + pageSize);
 
   pageItems.forEach((artist) => {
+    const fullyListened = isArtistFullyListened(artist);
+
     const li = document.createElement("li");
-    li.className = "album-row";
+    li.className = `album-row${fullyListened ? " artist-complete" : ""}`;
     li.dataset.artistId = artist.id;
     li.innerHTML = `
       <img src="${artist.imageUrl}" alt="" />
@@ -395,6 +409,7 @@ function renderArtistList(filterText = "") {
         <div class="album-row-title">${escapeHtml(artist.name)}</div>
         <div class="album-row-artist">${artist.albums.length} álbum${artist.albums.length === 1 ? "" : "s"}</div>
       </div>
+      ${fullyListened ? '<span class="artist-complete-badge" title="Todos os álbuns já ouvidos">🏆</span>' : ""}
     `;
     li.onclick = () => openArtist(artist);
     artistListEl.appendChild(li);
@@ -745,6 +760,7 @@ function renderTrackList(tracks) {
 function refreshBadgesEverywhere() {
   if (currentArtist) renderArtistAlbums(currentArtist);
   renderRatingsView(ratingsSearchInput.value);
+  if (!views.artists.classList.contains("hidden")) renderArtistList(searchInput.value);
 }
 
 listenedToggle.onclick = async (e) => {
